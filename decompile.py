@@ -147,6 +147,8 @@ if __name__== "__main__":
 
     if args.target.endswith('.jar'):
         path.append(args.target)
+    else:
+        path.append(os.path.dirname(args.target))
         
     targets = script_util.findFiles(args.target, args.r, '.class')
     targets = map(script_util.normalizeClassname, targets)

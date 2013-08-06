@@ -10,12 +10,16 @@ class MethodDef(object):
 
         if name == '<clinit>':
             self.isStaticInit, self.isConstructor = True, False
+            self.name=''
         elif name == '<init>':
             self.isStaticInit, self.isConstructor = False, True
             self.name = ast.TypeName((class_.name, 0))
         else:
             self.isStaticInit, self.isConstructor = False, False
             self.name = escape(name)
+
+    def fullName(self):
+        return str(self.name)+str(map(lambda x:x.print_(),self.paramDecls))
 
     def print_(self):
         argstr = ', '.join(decl.print_() for decl in self.paramDecls)
@@ -51,6 +55,7 @@ class ClassDef(object):
     def __init__(self, flags, isInterface, name, superc, interfaces, fields, methods):
         self.flagstr = flags + ' ' if flags else ''
         self.isInterface = isInterface
+        self.isEnum= superc == 'java/lang/Enum'
         self.name = ast.TypeName((name,0))
         self.super = ast.TypeName((superc,0)) if superc is not None else None
         self.interfaces = [ast.TypeName((iname,0)) for iname in interfaces]
@@ -58,19 +63,48 @@ class ClassDef(object):
         self.methods = methods
         if superc == 'java/lang/Object':
             self.super = None
+        if self.isEnum:
+            self.super = None;
+            blacklist=["values[]","valueOf['String s']","TypeName "+self.name.print_()+"['String s', 'int i']"]
+            self.methods=filter(lambda x:not x.fullName() in blacklist,self.methods)
+            self.enumElements=filter(lambda x:x.type_.print_()==self.name.print_(),self.fields)
+            self.fields=filter(lambda x:not x in self.enumElements,self.fields)
+            self.fields=filter(lambda x:x.name!='$VALUES',self.fields)
+            self.flagstr=self.flagstr.replace('final ','')
 
     def print_(self):
         contents = ''
+        if self.isEnum:
+            contents += ','.join(x.name for x in self.enumElements)+';'
         if self.fields:
-            contents = '\n'.join(x.print_() for x in self.fields)
+            contents += '\n'.join(x.print_() for x in self.fields)
         if self.methods:
             if contents:
                 contents += '\n\n' #extra line to divide fields and methods
             contents += '\n\n'.join(x.print_() for x in self.methods)
 
+        if self.isEnum:
+            #Remove the assignments in the static{} block
+            newContents=[]
+            blacklist=['new '+self.name.print_()+'(', '$VALUES =']
+            for x in self.enumElements:
+                blacklist.append(x.name+' =')
+            for line in contents.split('\n'):
+                works=True
+                for x in blacklist:
+                    works = works and not x in line
+                if works:
+                    newContents.append(line)
+            contents='\n'.join(newContents)
+
         indented = ['    '+line for line in contents.splitlines()]
         name = self.name.print_().rpartition('.')[-1]
-        defname = 'interface' if self.isInterface else 'class'
+        if self.isInterface:
+            defname='interface'
+        elif self.isEnum:
+            defname='enum'
+        else:
+            defname='class'
         header = '{}{} {}'.format(self.flagstr, defname, name)
 
         if self.super:

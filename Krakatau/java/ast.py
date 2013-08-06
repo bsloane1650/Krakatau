@@ -1,4 +1,5 @@
 import itertools
+import re
 
 from ..ssa import objtypes
 from .stringescape import escapeString
@@ -142,7 +143,11 @@ class SwitchStatement(LazyLabelBase):
 
     def print_(self): 
         expr = self.expr.print_()
-
+        #re-sugar switching on enums
+        #THis has the potential to be incorrect, but would require "$SwitchMap$" to actually be
+        #a variable name that got exported, and should be used in the switch 
+        if re.search("\$SwitchMap\$",expr): 
+            expr=expr.split('[')[1].split(']')[0]
         def printCase(keys):
             if keys is None:
                 return 'default: '
