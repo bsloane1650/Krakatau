@@ -225,6 +225,75 @@ class MethodDecompiler(object):
                 copyset_stack = copyset_stack[:ind] + (new_pair,) + copyset_stack[ind+1:]
             return copyset_stack, fallthrough_cset
 
+    def _pruneEnum(self,scope):
+        def isEnum(obj):
+            dtype=self.env.getClass(obj.dtype[0])            
+            return 'java/lang/Enum' in dtype.hierarchy
+
+        newItems=[]
+        for item in scope.statements:
+            remove=False
+            for sub in item.getScopes():
+                self._pruneEnum(sub)
+
+            #When java converts an Enum class into a class, it create a static initalizer for the Enum fields
+            #The main part of these is to call, for example, A = new EnumTest("A", 0)
+            #This is illegal java because we cannot directly call the constructor, nor can we assign to the field
+            #Additianally, all of the fields are put into an array, $VALUES. Again, we are not allowed to write to said field
+            if isinstance(item, ast.ExpressionStatement):
+                expr=item.expr;
+                if  isinstance(expr, ast.Assignment):
+                    left,right=expr.params
+                    if isinstance(right,ast.ClassInstanceCreation):
+                        if isEnum(item.expr.params[1]): 
+                            remove=True
+                    if isinstance(left,ast.FieldAccess):
+                        if left.name=='$VALUES' and isEnum(left): 
+                            remove=True
+                        isOfClass=self.method.class_.name==left.dtype[0] 
+                        isField=left.name in map(lambda x:x.name,self.method.class_.fields) 
+                        if isOfClass and isField and isEnum(right):
+                            remove=True
+            if not remove:
+                newItems.append(item)
+            scope.statements=newItems
+
+    def _fixEnumSwitch(self,scope):
+        def getEnumFields(dtype):
+            ans=[None] #apparently, java indexes from 1 not 0 here
+            for f in dtype.fields:
+                if f.class_==dtype:
+                    ans.append(f)
+            return ans
+        def isEnum(obj):
+            dtype=self.env.getClass(obj.dtype[0])            
+            return 'java/lang/Enum' in dtype.hierarchy
+        for item in scope.statements:
+            for sub in item.getScopes():
+                self._fixEnumSwitch(sub)
+            #When java compiles a switch statement using Enums,
+            #It translates the control from an enum to an int gotten from using e.ordinal on a lookup table
+            #This lookup table appears to be off by one of e.ordinal(); that is e.ordinal==0 means to use the first enum, which is case 1:
+            #Here we replace the control variable with the enum itself, and the cases with their corrosponding enum
+            if isinstance(item, ast.SwitchStatement):
+                expr=item.expr
+                if isinstance(expr,ast.ArrayAccess):
+                    obj=expr.params[1].params[0]
+                    if isEnum(obj) and "$SwitchMap$" in expr.params[0].name:
+                        expr.params[1]=obj
+                        dtype=self.env.getClass(obj.dtype[0])
+                        fields=getEnumFields(dtype)
+                        newPairs=[]
+                        for key,s in item.pairs:
+                            if key==None:
+                                newKey=None
+                            else:
+                                newKey=fields[key.pop()].name
+                            newPairs.append((newKey,s))
+                        item.pairs=newPairs
+                    item.expr=item.expr.params[1]
+
+
     def _pruneRethrow_cb(self, item):
         '''Convert try{A} catch(T e) {throw t;} to {A}'''
         while item.pairs:
@@ -728,6 +797,7 @@ class MethodDecompiler(object):
             boolize.boolizeVars(ast_root, argsources)
             self._preorder(ast_root, self._simplifyBlocks)
             self._setScopeParents(ast_root)
+            self._pruneEnum(ast_root) 
             
             self._setScopeParents(ast_root)
             self._mergeVariables(ast_root, argsources)
@@ -746,6 +816,7 @@ class MethodDecompiler(object):
 
             self._jumpReduction(ast_root, None, None, ())
             self._pruneVoidReturn(ast_root)
+            self._fixEnumSwitch(ast_root)
         else: #abstract or native method
             ast_root = None
             argsources = [ast.Local(tt, lambda expr:self.namegen.getPrefix('arg')) for tt in tts]
