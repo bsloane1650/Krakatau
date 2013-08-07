@@ -230,7 +230,6 @@ class MethodDecompiler(object):
         '''Re-sugar enums'''
         newItems=[]
         for item in scope.statements:
-            print type(item)
             remove=False
             for sub in item.getScopes():
                 self._pruneEnum(sub)
@@ -245,6 +244,14 @@ class MethodDecompiler(object):
                     if isinstance(left,ast.FieldAccess):
                         if left.name=='$VALUES': #This variable is auto-generated and populated by the compiler
                             remove=True
+                        isOfClass=self.method.class_.name==left.dtype[0] #left part of assignment is an instance of the current class 
+                        isField=left.name in map(lambda x:x.name,self.method.class_.fields) #Also, is it a field of this class
+                        isEnum='java/lang/Enum' in self.env.getClass(item.expr.params[1].dtype[0]).hierarchy #is it an enum
+                        #TODO, this doesn't feel sufficient. Also, clean up
+                        if isOfClass and isField and isEnum:
+                            remove=True
+
+
             #Switch statements are implemented by a lookup table such as "EnumTest$1.$SwitchMap$EnumTest[a.ordinal()]". Re-sugar it to a.ordinal()
             #TODO we shoud just switch on a
             if isinstance(item, ast.SwitchStatement):
@@ -253,6 +260,10 @@ class MethodDecompiler(object):
                         item.expr=item.expr.params[1]
             if not remove:
                 newItems.append(item)
+
+            if 'A =' in item.print_():
+                import pdb
+                #pdb.set_trace()
         scope.statements=newItems
 
     def _pruneRethrow_cb(self, item):
@@ -759,6 +770,7 @@ class MethodDecompiler(object):
             boolize.boolizeVars(ast_root, argsources)
             self._preorder(ast_root, self._simplifyBlocks)
             self._setScopeParents(ast_root)
+            self._pruneEnum(ast_root) #TODO would be nice to have this in 1 place only
             
             self._setScopeParents(ast_root)
             self._mergeVariables(ast_root, argsources)
@@ -780,7 +792,6 @@ class MethodDecompiler(object):
             self._pruneEnum(ast_root) #TODO would be nice to have this in 1 place only
             import pdb
             #pdb.set_trace()
-            print ast_root.print_()
 
         else: #abstract or native method
             ast_root = None
