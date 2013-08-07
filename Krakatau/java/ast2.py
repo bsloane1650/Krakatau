@@ -83,19 +83,19 @@ class ClassDef(object):
                 contents += '\n\n' #extra line to divide fields and methods
             contents += '\n\n'.join(x.print_() for x in self.methods)
 
-        if self.isEnum:
-            #Remove the assignments in the static{} block
-            newContents=[]
-            blacklist=['new '+self.name.print_()+'(', '$VALUES =']
-            for x in self.enumElements:
-                blacklist.append(x.name+' =')
-            for line in contents.split('\n'):
-                works=True
-                for x in blacklist:
-                    works = works and not x in line
-                if works:
-                    newContents.append(line)
-            contents='\n'.join(newContents)
+        #if self.isEnum:
+        #    #Remove the assignments in the static{} block
+        #    newContents=[]
+        #    blacklist=['new '+self.name.print_()+'(', '$VALUES =']
+        #    for x in self.enumElements:
+        #        blacklist.append(x.name+' =')
+        #    for line in contents.split('\n'):
+        #        works=True
+        #        for x in blacklist:
+        #            works = works and not x in line
+        #        if works:
+        #            newContents.append(line)
+        #    contents='\n'.join(newContents)
 
         indented = ['    '+line for line in contents.splitlines()]
         name = self.name.print_().rpartition('.')[-1]

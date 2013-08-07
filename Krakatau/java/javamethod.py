@@ -179,6 +179,7 @@ class MethodDecompiler(object):
                             copyset = copyset.copy()
                             copyset[k] = v + (left,)
                             remove = True
+                    
 
                 elif isinstance(expr, ast.MethodInvocation) and expr.name == '<init>':
                     left = expr.params[0]
@@ -196,6 +197,7 @@ class MethodDecompiler(object):
 
                     copyset = dict(kv for kv in copyset.items() if kv not in hits)
                     remove = True
+            
             if  not remove:
                 newitems.append(item)
 
@@ -217,13 +219,41 @@ class MethodDecompiler(object):
             else:
                 jumps = [x[0] for x in scope.jumps if x is not None and not x[1]]
                 target = jumps[-1] if jumps else None
-
             if target is not None:
                 keys = zip(*copyset_stack)[0]
                 ind = keys.index(target)
                 new_pair = target, mergeCopysets(copyset_stack[ind][1], copyset)
                 copyset_stack = copyset_stack[:ind] + (new_pair,) + copyset_stack[ind+1:]
             return copyset_stack, fallthrough_cset
+
+    def _pruneEnum(self,scope):
+        '''Re-sugar enums'''
+        newItems=[]
+        for item in scope.statements:
+            print type(item)
+            remove=False
+            for sub in item.getScopes():
+                self._pruneEnum(sub)
+            if isinstance(item, ast.ExpressionStatement):
+                expr=item.expr;
+                if  isinstance(expr, ast.Assignment):
+                    left,right=expr.params
+                    if isinstance(right,ast.ClassInstanceCreation):
+                        hierarchy=self.env.getClass(item.expr.params[1].typename.str).hierarchy
+                        if 'java/lang/Enum' in hierarchy: # The only time we would see an Enum constructor is in the initialization of Enum classes; which is handled automaticly by java.
+                            remove=True
+                    if isinstance(left,ast.FieldAccess):
+                        if left.name=='$VALUES': #This variable is auto-generated and populated by the compiler
+                            remove=True
+            #Switch statements are implemented by a lookup table such as "EnumTest$1.$SwitchMap$EnumTest[a.ordinal()]". Re-sugar it to a.ordinal()
+            #TODO we shoud just switch on a
+            if isinstance(item, ast.SwitchStatement):
+                if isinstance(item.expr,ast.ArrayAccess):
+                    if "$SwitchMap$" in item.expr.params[0].name:
+                        item.expr=item.expr.params[1]
+            if not remove:
+                newItems.append(item)
+        scope.statements=newItems
 
     def _pruneRethrow_cb(self, item):
         '''Convert try{A} catch(T e) {throw t;} to {A}'''
@@ -723,6 +753,7 @@ class MethodDecompiler(object):
             ################################################################################################
             ast_root.bases = (ast_root,) #needed for our setScopeParents later
 
+
             # print ast_root.print_()
             self._fixObjectCreations(ast_root)
             boolize.boolizeVars(ast_root, argsources)
@@ -746,6 +777,11 @@ class MethodDecompiler(object):
 
             self._jumpReduction(ast_root, None, None, ())
             self._pruneVoidReturn(ast_root)
+            self._pruneEnum(ast_root) #TODO would be nice to have this in 1 place only
+            import pdb
+            #pdb.set_trace()
+            print ast_root.print_()
+
         else: #abstract or native method
             ast_root = None
             argsources = [ast.Local(tt, lambda expr:self.namegen.getPrefix('arg')) for tt in tts]
