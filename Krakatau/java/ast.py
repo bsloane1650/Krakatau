@@ -1,4 +1,5 @@
 import itertools
+import re
 
 from ..ssa import objtypes
 from .stringescape import escapeString
@@ -142,7 +143,6 @@ class SwitchStatement(LazyLabelBase):
 
     def print_(self): 
         expr = self.expr.print_()
-
         def printCase(keys):
             if keys is None:
                 return 'default: '

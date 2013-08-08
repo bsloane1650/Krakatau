@@ -179,6 +179,7 @@ class MethodDecompiler(object):
                             copyset = copyset.copy()
                             copyset[k] = v + (left,)
                             remove = True
+                    
 
                 elif isinstance(expr, ast.MethodInvocation) and expr.name == '<init>':
                     left = expr.params[0]
@@ -196,6 +197,7 @@ class MethodDecompiler(object):
 
                     copyset = dict(kv for kv in copyset.items() if kv not in hits)
                     remove = True
+            
             if  not remove:
                 newitems.append(item)
 
@@ -217,7 +219,6 @@ class MethodDecompiler(object):
             else:
                 jumps = [x[0] for x in scope.jumps if x is not None and not x[1]]
                 target = jumps[-1] if jumps else None
-
             if target is not None:
                 keys = zip(*copyset_stack)[0]
                 ind = keys.index(target)
@@ -226,6 +227,10 @@ class MethodDecompiler(object):
             return copyset_stack, fallthrough_cset
 
     def _pruneEnum(self,scope):
+        #When java converts an Enum class into a class, it create a static initalizer for the Enum fields
+        #The main part of these is to call, for example, A = new EnumTest("A", 0)
+        #This is illegal java because we cannot directly call the constructor, nor can we assign to the field
+        #Additianally, all of the fields are put into an array, $VALUES. Again, we are not allowed to write to said field
         def isEnum(obj):
             dtype=self.env.getClass(obj.dtype[0])            
             return 'java/lang/Enum' in dtype.hierarchy
@@ -235,11 +240,6 @@ class MethodDecompiler(object):
             remove=False
             for sub in item.getScopes():
                 self._pruneEnum(sub)
-
-            #When java converts an Enum class into a class, it create a static initalizer for the Enum fields
-            #The main part of these is to call, for example, A = new EnumTest("A", 0)
-            #This is illegal java because we cannot directly call the constructor, nor can we assign to the field
-            #Additianally, all of the fields are put into an array, $VALUES. Again, we are not allowed to write to said field
             if isinstance(item, ast.ExpressionStatement):
                 expr=item.expr;
                 if  isinstance(expr, ast.Assignment):
@@ -259,6 +259,10 @@ class MethodDecompiler(object):
             scope.statements=newItems
 
     def _fixEnumSwitch(self,scope):
+        #When java compiles a switch statement using Enums,
+        #It translates the control from an enum to an int gotten from using e.ordinal on a lookup table
+        #This lookup table appears to be off by one of e.ordinal(); that is e.ordinal==0 means to use the first enum, which is case 1:
+        #Here we replace the control variable with the enum itself, and the cases with their corrosponding enum
         def getEnumFields(dtype):
             ans=[None] #apparently, java indexes from 1 not 0 here
             for f in dtype.fields:
@@ -271,10 +275,6 @@ class MethodDecompiler(object):
         for item in scope.statements:
             for sub in item.getScopes():
                 self._fixEnumSwitch(sub)
-            #When java compiles a switch statement using Enums,
-            #It translates the control from an enum to an int gotten from using e.ordinal on a lookup table
-            #This lookup table appears to be off by one of e.ordinal(); that is e.ordinal==0 means to use the first enum, which is case 1:
-            #Here we replace the control variable with the enum itself, and the cases with their corrosponding enum
             if isinstance(item, ast.SwitchStatement):
                 expr=item.expr
                 if isinstance(expr,ast.ArrayAccess):
@@ -292,7 +292,6 @@ class MethodDecompiler(object):
                             newPairs.append((newKey,s))
                         item.pairs=newPairs
                     item.expr=item.expr.params[1]
-
 
     def _pruneRethrow_cb(self, item):
         '''Convert try{A} catch(T e) {throw t;} to {A}'''
@@ -792,6 +791,7 @@ class MethodDecompiler(object):
             ################################################################################################
             ast_root.bases = (ast_root,) #needed for our setScopeParents later
 
+
             # print ast_root.print_()
             self._fixObjectCreations(ast_root)
             boolize.boolizeVars(ast_root, argsources)
@@ -817,6 +817,7 @@ class MethodDecompiler(object):
             self._jumpReduction(ast_root, None, None, ())
             self._pruneVoidReturn(ast_root)
             self._fixEnumSwitch(ast_root)
+
         else: #abstract or native method
             ast_root = None
             argsources = [ast.Local(tt, lambda expr:self.namegen.getPrefix('arg')) for tt in tts]
